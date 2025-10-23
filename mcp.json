@@ -17,6 +17,17 @@
     "transport": "stdio",
     "enabled": true
   },
+  "playwright": {
+    "command": "npx",
+    "args": ["@playwright/mcp@latest"],
+    "transport": "stdio",
+    "enabled": false,
+    "env": {
+      "PLAYWRIGHT_HEADLESS": "true",
+      "PLAYWRIGHT_TIMEOUT": "30000",
+      "PLAYWRIGHT_LAUNCH_ARGS": "--disable-blink-features=AutomationControlled"
+    }
+  },
   "blender": {
     "command": "uvx",
     "args": ["blender-mcp"],
@@ -33,7 +44,7 @@
     "command": "npx",
     "args": ["@modelcontextprotocol/server-sequential-thinking"],
     "transport": "stdio",
-    "enabled": true
+    "enabled": false
   },
   "win-cli": {
     "command": "npx",
