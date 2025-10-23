@@ -1,0 +1,54 @@
+{
+  "filesystem": {
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-filesystem", "{filesystem_path}"],
+    "transport": "stdio",
+    "enabled": true
+  },
+  "duckduckgo": {
+    "command": "uvx",
+    "args": ["duckduckgo-mcp-server"],
+    "transport": "stdio",
+    "enabled": true
+  },
+  "fetch": {
+    "command": "uvx",
+    "args": ["mcp-server-fetch"],
+    "transport": "stdio",
+    "enabled": true
+  },
+  "blender": {
+    "command": "uvx",
+    "args": ["blender-mcp"],
+    "transport": "stdio",
+    "enabled": false
+  },
+  "excel": {
+    "command": "uvx",
+    "args": ["excel-mcp-server", "stdio"],
+    "transport": "stdio",
+    "enabled": false
+  },
+  "sequential-thinking": {
+    "command": "npx",
+    "args": ["@modelcontextprotocol/server-sequential-thinking"],
+    "transport": "stdio",
+    "enabled": true
+  },
+  "win-cli": {
+    "command": "npx",
+    "args": ["@simonb97/server-win-cli", "--config", "./win-cli-config.json"],
+    "transport": "stdio",
+    "enabled": true
+  },
+  "mcp-telegram": {
+    "command": "C:\\Users\\maks\\AppData\\Roaming\\uv\\tools\\mcp-telegram\\Scripts\\mcp-telegram.exe",
+    "args": ["start"],
+    "env": {
+      "API_ID": "28230035",
+      "API_HASH": "b8c30a2a36123d66229fdcb0f1856a06"
+    },
+    "transport": "stdio",
+    "enabled": false
+  }
+}

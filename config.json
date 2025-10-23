@@ -1,0 +1,25 @@
+{
+    "logging": {
+        "level": "INFO",
+        "file": "ai_agent.log",
+        "format": "%(asctime)s - %(levelname)s - %(message)s"
+    },
+    "agent": {
+        "model_name": "gemini-flash-latest",
+        "model_provider": "gemini",
+        "temperature": 0.2,
+        "use_memory": true,
+        "max_context_files": 20
+    },
+    "files": {
+        "prompt_file": "prompt_optimized.md",
+        "mcp_config_file": "mcp.json"
+    },
+    "interface": {
+        "show_timestamps": true,
+        "theme": "dark",
+        "max_response_length": 1000,
+        "improve_file_formatting": true,
+        "syntax_highlighting": true
+    }
+}

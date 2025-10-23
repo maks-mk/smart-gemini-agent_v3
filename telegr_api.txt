@@ -1,0 +1,16 @@
+API_ID приложения: 28230035
+
+Приложение api_hash: b8c30a2a36123d66229fdcb0f1856a06
+
+{
+  "mcpServers": {
+    "mcp-telegram": {
+      "command": "C:\\Users\\maks\\AppData\\Roaming\\uv\\tools\\mcp-telegram\\Scripts\\mcp-telegram.exe",
+      "args": ["start"],
+      "env": {
+        "API_ID": "28230035",
+        "API_HASH": "b8c30a2a36123d66229fdcb0f1856a06"
+      }
+    }
+  }
+}
