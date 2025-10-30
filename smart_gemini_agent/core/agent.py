@@ -35,9 +35,20 @@ MAX_RETRY_ATTEMPTS = 2
 DEFAULT_THREAD_ID = "default"
 MAX_RECOVERY_SUGGESTIONS = 3
 RATE_LIMIT_HTTP_CODE = "429"
+MAX_TOOL_REPEATS = 5  # Максимальное количество повторов одного инструмента
 
 # Предкомпилированные регулярные выражения
 _RETRY_DELAY_PATTERN = re.compile(r"retry_delay\s*{\s*seconds:\s*(\d+)")
+
+
+class LoopDetectedException(Exception):
+    """Исключение при обнаружении зацикливания"""
+    def __init__(self, tool_name: str, call_count: int):
+        self.tool_name = tool_name
+        self.call_count = call_count
+        super().__init__(
+            f"Обнаружено зацикливание: инструмент '{tool_name}' вызван {call_count} раз"
+        )
 
 
 class FileSystemAgent:
@@ -53,6 +64,7 @@ class FileSystemAgent:
         self.mcp_client = None
         self.tools: List[BaseTool] = []
         self._initialized = False
+        self._allow_loop_continuation = False  # Флаг для продолжения при зацикливании
 
         # Инициализируем компоненты
         self.tool_analyzer = ToolAnalyzer()
@@ -202,6 +214,9 @@ class FileSystemAgent:
         tool_used = None
         success = True
         error_message = None
+        
+        # Отслеживание повторяющихся вызовов инструментов
+        tool_call_tracker: Dict[str, int] = {}
 
         try:
             # Создаем улучшенный контекст без системы намерений
@@ -214,7 +229,10 @@ class FileSystemAgent:
                 }
                 return
 
-            config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+            config: RunnableConfig = {
+                "configurable": {"thread_id": thread_id},
+                "recursion_limit": 50  # Увеличиваем лимит рекурсии
+            }
             message_input = {"messages": [HumanMessage(content=enhanced_input)]}
 
             async for chunk in self.agent.astream(message_input, config):
@@ -226,6 +244,36 @@ class FileSystemAgent:
                             if msg.tool_calls:
                                 for tool_call in msg.tool_calls:
                                     tool_used = tool_call["name"]
+                                    
+                                    # Отслеживаем повторяющиеся вызовы
+                                    tool_call_tracker[tool_used] = tool_call_tracker.get(tool_used, 0) + 1
+                                    
+                                    # Обнаружено зацикливание
+                                    if tool_call_tracker[tool_used] > MAX_TOOL_REPEATS:
+                                        logger.warning(
+                                            f"⚠️ Инструмент '{tool_used}' вызван {tool_call_tracker[tool_used]} раз. "
+                                            f"Возможно зацикливание!"
+                                        )
+                                        
+                                        # Если не разрешено продолжение, выдаем предупреждение и останавливаемся
+                                        if not self._allow_loop_continuation:
+                                            # Выдаем специальное событие с предупреждением
+                                            yield {
+                                                "loop_warning": {
+                                                    "tool_name": tool_used,
+                                                    "call_count": tool_call_tracker[tool_used],
+                                                    "message": (
+                                                        f"⚠️ **Обнаружено зацикливание**\n\n"
+                                                        f"Инструмент `{tool_used}` был вызван {tool_call_tracker[tool_used]} раз подряд.\n\n"
+                                                        f"**Возможные действия:**\n"
+                                                        f"• Остановить выполнение (рекомендуется)\n"
+                                                        f"• Продолжить выполнение (введите команду: `/продолжить` или `/continue`)\n"
+                                                        f"• Отключить проблемный инструмент в `mcp.json`"
+                                                    )
+                                                }
+                                            }
+                                            # Останавливаем выполнение
+                                            raise LoopDetectedException(tool_used, tool_call_tracker[tool_used])
 
                 yield chunk
 
@@ -255,6 +303,22 @@ class FileSystemAgent:
                     f"{wait_hint}"
                 )
             yield {"error": friendly_error}
+        except LoopDetectedException as e:
+            # Обработка зацикливания
+            success = False
+            error_message = str(e)
+            logger.error(f"🔄 Остановлено из-за зацикливания: {error_message}")
+            yield {
+                "error": (
+                    f"🔄 **Выполнение остановлено**\n\n"
+                    f"Причина: {error_message}\n\n"
+                    f"💡 **Рекомендации:**\n"
+                    f"1. Переформулируйте запрос более четко\n"
+                    f"2. Отключите проблемный инструмент `{e.tool_name}` в `mcp.json`\n"
+                    f"3. Используйте `/продолжить` для игнорирования предупреждения\n\n"
+                    f"⚙️ Для продолжения с игнорированием зацикливания введите: `/продолжить`"
+                )
+            }
         except Exception as e:
             # Обрабатываем ошибки OpenRouter отдельно
             error_text = str(e).lower()
@@ -447,3 +511,19 @@ class FileSystemAgent:
             )
 
         return enhanced_msg
+
+    def enable_loop_continuation(self):
+        """Включить режим игнорирования зацикливания"""
+        self._allow_loop_continuation = True
+        logger.info("✅ Режим игнорирования зацикливания включен")
+        return "✅ Режим игнорирования зацикливания включен. Следующий запрос будет выполнен без остановки на повторяющихся вызовах инструментов."
+
+    def disable_loop_continuation(self):
+        """Выключить режим игнорирования зацикливания"""
+        self._allow_loop_continuation = False
+        logger.info("❌ Режим игнорирования зацикливания выключен")
+        return "❌ Режим игнорирования зацикливания выключен. Агент будет останавливаться при обнаружении зацикливания."
+
+    def get_loop_continuation_status(self) -> bool:
+        """Получить статус режима игнорирования зацикливания"""
+        return self._allow_loop_continuation

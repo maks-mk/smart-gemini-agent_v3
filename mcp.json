@@ -61,5 +61,13 @@
     },
     "transport": "stdio",
     "enabled": false
+  },
+  "chrome-mcp": {
+    "command": "node",
+    "args": [
+      "C:\\Users\\user\\AppData\\Roaming\\npm\\node_modules\\mcp-chrome-bridge\\dist\\mcp\\mcp-server-stdio.js"
+    ],
+    "transport": "stdio",
+    "enabled": false
   }
 }

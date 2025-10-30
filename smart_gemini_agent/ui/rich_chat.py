@@ -159,6 +159,28 @@ class RichInteractiveChat:
             else:
                 self.display.display_error("Agent not initialized")
 
+        elif command in ["/продолжить", "/continue"]:
+            if self.agent:
+                message = self.agent.enable_loop_continuation()
+                self.display.display_success(message)
+            else:
+                self.display.display_error("Agent not initialized")
+
+        elif command in ["/остановить", "/stop_loop"]:
+            if self.agent:
+                message = self.agent.disable_loop_continuation()
+                self.display.display_success(message)
+            else:
+                self.display.display_error("Agent not initialized")
+
+        elif command == "/loop_status":
+            if self.agent:
+                status = self.agent.get_loop_continuation_status()
+                status_text = "включен" if status else "выключен"
+                self.console.print(f"[cyan]Режим игнорирования зацикливания: {status_text}[/cyan]")
+            else:
+                self.display.display_error("Agent not initialized")
+
         else:
             self.display.display_error(f"Unknown command: {command}")
             self.display.display_help()
@@ -221,6 +243,9 @@ class RichInteractiveChat:
             ("/export_context [json|markdown]", "Export agent context and statistics"),
             ("/reload", "Reload system prompt from file"),
             ("/memory", "Clear agent context memory"),
+            ("/продолжить or /continue", "Enable loop continuation mode (ignore loop warnings)"),
+            ("/остановить or /stop_loop", "Disable loop continuation mode"),
+            ("/loop_status", "Check loop continuation mode status"),
         ]
 
         for cmd, desc in new_commands:
@@ -454,6 +479,17 @@ class RichInteractiveChat:
                     async for chunk in self.agent.process_message(
                         user_input, self.current_thread
                     ):
+                        # Обработка предупреждения о зацикливании
+                        if "loop_warning" in chunk:
+                            warning_info = chunk["loop_warning"]
+                            self.console.print()
+                            self.console.print("[bold red]⚠️ ПРЕДУПРЕЖДЕНИЕ О ЗАЦИКЛИВАНИИ[/bold red]")
+                            self.console.print()
+                            self.console.print(warning_info["message"])
+                            self.console.print()
+                            # Продолжаем ожидать следующий chunk (может быть error или продолжение)
+                            continue
+
                         if "error" in chunk:
                             self.display.display_error(chunk["error"])
                             had_error_in_this_turn = True
