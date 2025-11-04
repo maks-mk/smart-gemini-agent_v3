@@ -1,14 +1,18 @@
 """
-Конфигурация AI-агента для Gemini
+Конфигурация AI-агента для Gemini с поддержкой HTTP/SSE транспорта
 """
 
 import os
 import json
 import logging
-from dataclasses import dataclass
-from typing import Dict, Any, Optional
+from dataclasses import dataclass, field
+from typing import Dict, Any, Optional, List, Literal
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+# Типы поддерживаемых транспортов
+TransportType = Literal["stdio", "sse", "streamable-http"]
 
 
 @dataclass
@@ -24,6 +28,8 @@ class AgentConfig:
     prompt_file: str = "prompt.md"
     mcp_config_file: str = "mcp.json"
     max_context_files: int = 20
+    request_timeout: float = 300.0  # Таймаут запроса в секундах
+    tool_timeout: float = 300.0  # Таймаут инструмента в секундах
 
     @classmethod
     def from_file(cls, config_file: str = "config.json") -> "AgentConfig":
@@ -51,6 +57,8 @@ class AgentConfig:
                     ),
                     prompt_file=files_config.get("prompt_file", "prompt.md"),
                     mcp_config_file=files_config.get("mcp_config_file", "mcp.json"),
+                    request_timeout=float(agent_config.get("request_timeout", 300.0)),
+                    tool_timeout=float(agent_config.get("tool_timeout", 300.0)),
                 )
             else:
                 logger.info(
@@ -135,7 +143,7 @@ class AgentConfig:
             return self._get_default_mcp_config()
 
     def _filter_enabled_servers(self, config: Dict[str, Any]) -> Dict[str, Any]:
-        """Фильтрует только включенные MCP серверы"""
+        """Фильтрует только включенные MCP серверы с валидацией транспорта"""
         enabled_config = {}
 
         for server_name, server_config in config.items():
@@ -143,6 +151,11 @@ class AgentConfig:
             is_enabled = server_config.get("enabled", True)
 
             if is_enabled:
+                # Валидируем конфигурацию сервера
+                if not self._validate_server_config(server_name, server_config):
+                    logger.warning(f"Сервер {server_name} пропущен из-за невалидной конфигурации")
+                    continue
+                
                 # Создаем копию конфигурации без параметра enabled для MCP клиента
                 clean_config = {
                     k: v for k, v in server_config.items() if k != "enabled"
@@ -152,6 +165,43 @@ class AgentConfig:
                 logger.debug(f"Сервер {server_name} отключен (enabled: false)")
 
         return enabled_config
+
+    def _validate_server_config(self, server_name: str, server_config: Dict[str, Any]) -> bool:
+        """Валидация конфигурации MCP сервера"""
+        transport = server_config.get("transport", "stdio")
+        
+        # Валидация для stdio транспорта
+        if transport == "stdio":
+            if "command" not in server_config:
+                logger.error(f"Сервер {server_name}: отсутствует 'command' для stdio транспорта")
+                return False
+            return True
+        
+        # Валидация для HTTP/SSE транспортов
+        elif transport in ["sse", "streamable-http"]:
+            url = server_config.get("url")
+            if not url:
+                logger.error(f"Сервер {server_name}: отсутствует 'url' для {transport} транспорта")
+                return False
+            
+            # Валидация URL
+            try:
+                parsed = urlparse(url)
+                if not parsed.scheme in ["http", "https"]:
+                    logger.error(f"Сервер {server_name}: невалидная схема URL '{parsed.scheme}', ожидается http или https")
+                    return False
+                if not parsed.netloc:
+                    logger.error(f"Сервер {server_name}: отсутствует хост в URL")
+                    return False
+            except Exception as e:
+                logger.error(f"Сервер {server_name}: ошибка парсинга URL - {e}")
+                return False
+            
+            return True
+        
+        else:
+            logger.error(f"Сервер {server_name}: неподдерживаемый транспорт '{transport}'")
+            return False
 
     def _get_default_mcp_config(self) -> Dict[str, Any]:
         """Конфигурация MCP серверов по умолчанию"""

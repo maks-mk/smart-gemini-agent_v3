@@ -1,7 +1,5 @@
 # Core dependencies
-# asyncio-compat>=0.1.0    # commented: usually unnecessary on modern Python
 python-dotenv>=1.0.0
-# pathlib>=1.0.1           # commented: pathlib is in stdlib
 
 # AI and LangChain
 langchain-google-genai>=1.0.0
@@ -16,6 +14,14 @@ rich>=13.0.0
 # Data handling
 pydantic>=2.0.0
 
+# HTTP/Network support for SSE and Streamable HTTP transports
+httpx>=0.24.0           # Modern HTTP client with HTTP/2 support
+aiohttp>=3.8.0          # Async HTTP client/server
+sse-starlette>=1.6.0    # Server-Sent Events support
+websockets>=11.0        # WebSocket support for potential future use
+
 # Optional MCP servers (install separately)
 # duckduckgo-mcp-server  # pip install duckduckgo-mcp-server
 # mcp-server-fetch       # pip install mcp-server-fetch
+# blender-mcp            # pip install blender-mcp
+# excel-mcp-server       # pip install excel-mcp-server

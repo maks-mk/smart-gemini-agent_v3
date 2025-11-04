@@ -44,7 +44,7 @@
     "command": "npx",
     "args": ["@modelcontextprotocol/server-sequential-thinking"],
     "transport": "stdio",
-    "enabled": false
+    "enabled": true
   },
   "win-cli": {
     "command": "npx",
@@ -69,5 +69,27 @@
     ],
     "transport": "stdio",
     "enabled": false
+  },
+  "example-http-server": {
+    "transport": "sse",
+    "url": "http://localhost:3000/sse",
+    "enabled": false,
+    "description": "Пример конфигурации для HTTP SSE транспорта"
+  },
+  "example-streamable-http": {
+    "transport": "streamable-http",
+    "url": "https://api.example.com/mcp",
+    "headers": {
+      "Authorization": "Bearer YOUR_API_KEY",
+      "Content-Type": "application/json"
+    },
+    "enabled": false,
+    "description": "Пример конфигурации для Streamable HTTP транспорта с заголовками"
+  },
+  "local-http-mcp": {
+    "transport": "sse",
+    "url": "http://localhost:8080/mcp/stream",
+    "enabled": false,
+    "description": "Локальный HTTP MCP сервер через SSE"
   }
 }

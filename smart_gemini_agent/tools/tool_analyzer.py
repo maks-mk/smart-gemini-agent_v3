@@ -133,16 +133,16 @@ class ToolAnalyzer:
 
         # Автоматическое определение категорий на основе доступных инструментов
         category_names = {
-            "read_file": "ЧТЕНИЕ ФАЙЛОВ",
-            "write_file": "СОЗДАНИЕ/ЗАПИСЬ ФАЙЛОВ",
-            "list_directory": "ПРОСМОТР ДИРЕКТОРИЙ",
+            "read_file": "ЧТЕНИЕ",
+            "write_file": "ЗАПИСЬ",
+            "list_directory": "СПИСОК",
             "create_directory": "СОЗДАНИЕ ПАПОК",
-            "delete_file": "УДАЛЕНИЕ ФАЙЛОВ/ПАПОК",
-            "move_file": "ПЕРЕМЕЩЕНИЕ/ПЕРЕИМЕНОВАНИЕ",
-            "search": "ПОИСК ФАЙЛОВ",
-            "web_search": "ВЕБ-ПОИСК",
-            "fetch_url": "ЗАГРУЗКА ИЗ ИНТЕРНЕТА",
-            "other": "ДРУГИЕ ИНСТРУМЕНТЫ",
+            "delete_file": "УДАЛЕНИЕ",
+            "move_file": "ПЕРЕМЕЩЕНИЕ",
+            "search": "ПОИСК",
+            "web_search": "ВЕБ",
+            "fetch_url": "ЗАГРУЗКА URL",
+            "other": "ПРОЧЕЕ",
         }
 
         # Показываем только категории с доступными инструментами
@@ -177,34 +177,34 @@ class ToolAnalyzer:
         # Паттерны для определения функций инструментов
         patterns = {
             # Чтение файлов
-            r"(read|get|cat|show|view).*file": "Читает содержимое файла",
+            r"(read|get|cat|show|view).*file": "Читает файл",
             r"(read|get)_.*": "Читает данные",
             # Запись файлов
-            r"(write|create|save|put).*file": "Создает или записывает файл",
-            r"(write|create)_.*": "Создает или записывает данные",
+            r"(write|create|save|put).*file": "Пишет файл",
+            r"(write|create)_.*": "Пишет данные",
             # Работа с директориями
-            r"(list|ls|dir).*": "Показывает содержимое директории",
-            r".*(directory|dir|folder).*list": "Показывает содержимое директории",
-            r"create.*(directory|dir|folder)": "Создает новую папку",
-            r"mkdir": "Создает новую папку",
+            r"(list|ls|dir).*": "Список директории",
+            r".*(directory|dir|folder).*list": "Список директории",
+            r"create.*(directory|dir|folder)": "Создает папку",
+            r"mkdir": "Создает папку",
             # Удаление
-            r"(delete|remove|rm|unlink).*": "Удаляет файл или папку",
-            r"safe_delete_file": "Безопасно удаляет файлы только внутри рабочей директории",
-            r"safe_delete_directory": "Безопасно удаляет директории только внутри рабочей директории",
+            r"(delete|remove|rm|unlink).*": "Удаляет",
+            r"safe_delete_file": "Безопасное удаление файлов в рабочей директории",
+            r"safe_delete_directory": "Безопасное удаление папок в рабочей директории",
             # Перемещение
-            r"(move|mv|rename).*": "Перемещает или переименовывает файл",
+            r"(move|mv|rename).*": "Перемещает/переименовывает",
             # Поиск
-            r"(search|find|grep).*file": "Ищет файлы по критериям",
-            r"(search|find).*": "Выполняет поиск",
+            r"(search|find|grep).*file": "Поиск файлов",
+            r"(search|find).*": "Поиск",
             # Веб-функции
-            r".*(web|internet|duckduckgo|google).*search": "Поиск информации в интернете",
-            r"(fetch|download|get).*url": "Загружает данные по URL",
-            r"(http|https|url).*": "Работает с веб-ресурсами",
+            r".*(web|internet|duckduckgo|google).*search": "Веб-поиск",
+            r"(fetch|download|get).*url": "Загружает URL",
+            r"(http|https|url).*": "Работа с веб",
             # Системные команды
-            r"(shell|exec|run|command).*": "Выполняет системные команды",
+            r"(shell|exec|run|command).*": "Системные команды",
             # Специальные функции
-            r".*server.*": "MCP сервер инструмент",
-            r".*mcp.*": "Model Context Protocol инструмент",
+            r".*server.*": "MCP сервер",
+            r".*mcp.*": "MCP инструмент",
         }
 
         # Проверяем паттерны

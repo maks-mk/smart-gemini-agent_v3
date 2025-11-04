@@ -1,10 +1,12 @@
 """
 Основной класс Smart AI Agent с оптимизированной производительностью
+Поддержка stdio и HTTP/SSE транспортов для MCP серверов
 """
 
 import os
 import re
 import time
+import asyncio
 from pathlib import Path
 from typing import Dict, Any, List, Optional, AsyncGenerator, cast
 import logging
@@ -23,6 +25,7 @@ from ..config.agent_config import AgentConfig
 from ..tools.delete_tools import SafeDeleteFileTool, SafeDeleteDirectoryTool
 from ..tools.tool_analyzer import ToolAnalyzer
 from ..utils.decorators import retry_on_failure, retry_on_failure_async_gen
+from ..utils.timeout import async_gen_timeout_wrapper, get_watchdog
 from .prompt_manager import PromptManager
 from .response_formatter import ResponseFormatter
 from .context_manager import SmartContextManager, ContextType
@@ -36,6 +39,8 @@ DEFAULT_THREAD_ID = "default"
 MAX_RECOVERY_SUGGESTIONS = 3
 RATE_LIMIT_HTTP_CODE = "429"
 MAX_TOOL_REPEATS = 5  # Максимальное количество повторов одного инструмента
+DEFAULT_REQUEST_TIMEOUT = 300.0  # Таймаут запроса по умолчанию (секунды)
+DEFAULT_TOOL_TIMEOUT = 300.0  # Таймаут инструмента по умолчанию (секунды)
 
 # Предкомпилированные регулярные выражения
 _RETRY_DELAY_PATTERN = re.compile(r"retry_delay\s*{\s*seconds:\s*(\d+)")
@@ -65,6 +70,10 @@ class FileSystemAgent:
         self.tools: List[BaseTool] = []
         self._initialized = False
         self._allow_loop_continuation = False  # Флаг для продолжения при зацикливании
+        
+        # Таймауты
+        self.request_timeout = getattr(config, 'request_timeout', DEFAULT_REQUEST_TIMEOUT)
+        self.tool_timeout = getattr(config, 'tool_timeout', DEFAULT_TOOL_TIMEOUT)
 
         # Инициализируем компоненты
         self.tool_analyzer = ToolAnalyzer()
@@ -148,15 +157,21 @@ class FileSystemAgent:
 
     @retry_on_failure()
     async def _init_mcp_client(self):
-        """Инициализация MCP клиента"""
+        """Инициализация MCP клиента с поддержкой stdio и HTTP/SSE транспортов"""
         logger.info("Инициализация MCP клиента...")
+
+        # Получаем конфигурацию серверов
+        mcp_config = self.config.get_mcp_config()
+        
+        # Логируем информацию о транспортах
+        self._log_transport_info(mcp_config)
 
         # Временно подавить предупреждения во время инициализации
         old_level = logging.getLogger().level
         logging.getLogger().setLevel(logging.ERROR)
 
         try:
-            self.mcp_client = MultiServerMCPClient(self.config.get_mcp_config())
+            self.mcp_client = MultiServerMCPClient(mcp_config)
             self.tools = await self.mcp_client.get_tools()
         finally:
             # Восстановить уровень логирования
@@ -174,6 +189,26 @@ class FileSystemAgent:
         logger.info(f"Загружено {len(self.tools)} инструментов")
         for tool in self.tools:
             logger.info(f"  • {tool.name}")
+    
+    def _log_transport_info(self, mcp_config: Dict[str, Any]) -> None:
+        """Логирование информации о типах транспорта MCP серверов"""
+        transport_stats = {"stdio": 0, "sse": 0, "streamable-http": 0}
+        
+        for server_name, server_config in mcp_config.items():
+            transport = server_config.get("transport", "stdio")
+            if transport in transport_stats:
+                transport_stats[transport] += 1
+            
+            # Детальное логирование для HTTP транспортов
+            if transport in ["sse", "streamable-http"]:
+                url = server_config.get("url", "не указан")
+                logger.info(f"  📡 {server_name}: {transport} транспорт ({url})")
+            else:
+                command = server_config.get("command", "не указан")
+                logger.info(f"  💻 {server_name}: {transport} транспорт ({command})")
+        
+        logger.info(f"📊 Статистика транспортов: stdio={transport_stats['stdio']}, "
+                   f"sse={transport_stats['sse']}, http={transport_stats['streamable-http']}")
 
     def _add_local_tools(self):
         """Добавление локальных инструментов"""
@@ -231,11 +266,20 @@ class FileSystemAgent:
 
             config: RunnableConfig = {
                 "configurable": {"thread_id": thread_id},
-                "recursion_limit": 50  # Увеличиваем лимит рекурсии
+                "recursion_limit": 20  # Ограничиваем рекурсию для предотвращения зависания
             }
             message_input = {"messages": [HumanMessage(content=enhanced_input)]}
 
-            async for chunk in self.agent.astream(message_input, config):
+            # Используем таймаут обертку для предотвращения зависаний
+            stream_gen = self.agent.astream(message_input, config)
+            last_activity = time.time()
+            
+            async for chunk in async_gen_timeout_wrapper(
+                stream_gen,
+                timeout=self.request_timeout,
+                per_item_timeout=self.tool_timeout,
+                heartbeat_interval=10.0
+            ):
                 # Отслеживаем использование инструментов
                 if "agent" in chunk:
                     agent_step = chunk["agent"]
@@ -263,20 +307,32 @@ class FileSystemAgent:
                                                     "tool_name": tool_used,
                                                     "call_count": tool_call_tracker[tool_used],
                                                     "message": (
-                                                        f"⚠️ **Обнаружено зацикливание**\n\n"
-                                                        f"Инструмент `{tool_used}` был вызван {tool_call_tracker[tool_used]} раз подряд.\n\n"
-                                                        f"**Возможные действия:**\n"
-                                                        f"• Остановить выполнение (рекомендуется)\n"
-                                                        f"• Продолжить выполнение (введите команду: `/продолжить` или `/continue`)\n"
-                                                        f"• Отключить проблемный инструмент в `mcp.json`"
+                                                        f"Loop: {tool_used} x{tool_call_tracker[tool_used]}\n"
+                                                        f"Stop | /continue | disable in mcp.json"
                                                     )
                                                 }
                                             }
                                             # Останавливаем выполнение
                                             raise LoopDetectedException(tool_used, tool_call_tracker[tool_used])
 
+                last_activity = time.time()
                 yield chunk
 
+        except TimeoutError as e:
+            # Обработка таймаута
+            success = False
+            error_message = str(e)
+            logger.error(f"⏱️ Timeout: {error_message}")
+            yield {
+                "error": (
+                    f"⏱️ Timeout: операция заняла более {self.request_timeout}с\n"
+                    f"Fix: упростите запрос | отключите медленные инструменты в mcp.json"
+                )
+            }
+        except asyncio.CancelledError:
+            # Операция прервана пользователем (Ctrl+C)
+            logger.info("🛑 Операция прервана пользователем")
+            yield {"error": "🛑 Операция прервана пользователем (Ctrl+C)"}
         except ResourceExhausted as e:
             error_text = str(e)
             retry_secs = None
@@ -293,40 +349,29 @@ class FileSystemAgent:
             # Улучшенное сообщение об ошибке, которое учитывает провайдера модели
             if self.config.model_provider == "gemini":
                 friendly_error = (
-                    f"😔 **Превышены лимиты API Google Gemini (ошибка 429)**\n\n"
-                    f"{wait_hint}\n\n"
-                    f"Подробнее о квотах: https://ai.google.dev/gemini-api/docs/rate-limits"
+                    f"Rate limit (429). {wait_hint}"
                 )
             else:
                 friendly_error = (
-                    f"😔 **Превышены лимиты API {self.config.model_provider.capitalize()} (ошибка 429)**\n\n"
-                    f"{wait_hint}"
+                    f"Rate limit {self.config.model_provider} (429). {wait_hint}"
                 )
             yield {"error": friendly_error}
         except LoopDetectedException as e:
             # Обработка зацикливания
             success = False
             error_message = str(e)
-            logger.error(f"🔄 Остановлено из-за зацикливания: {error_message}")
+            logger.error(f"Loop stopped: {error_message}")
             yield {
                 "error": (
-                    f"🔄 **Выполнение остановлено**\n\n"
-                    f"Причина: {error_message}\n\n"
-                    f"💡 **Рекомендации:**\n"
-                    f"1. Переформулируйте запрос более четко\n"
-                    f"2. Отключите проблемный инструмент `{e.tool_name}` в `mcp.json`\n"
-                    f"3. Используйте `/продолжить` для игнорирования предупреждения\n\n"
-                    f"⚙️ Для продолжения с игнорированием зацикливания введите: `/продолжить`"
+                    f"Stopped: {error_message}\n"
+                    f"Fix: rephrase | disable {e.tool_name} | /continue"
                 )
             }
         except Exception as e:
             # Обрабатываем ошибки OpenRouter отдельно
             error_text = str(e).lower()
             if "rate limit" in error_text or RATE_LIMIT_HTTP_CODE in error_text:
-                friendly_error = (
-                    f"😔 **Превышены лимиты API {self.config.model_provider.capitalize()} (ошибка 429)**\n\n"
-                    f"Пожалуйста, подождите немного и повторите попытку."
-                )
+                friendly_error = f"Rate limit {self.config.model_provider} (429). Wait & retry."
                 yield {"error": friendly_error}
                 return
 
@@ -377,36 +422,27 @@ class FileSystemAgent:
 
     def _create_enhanced_context(self, user_input: str) -> str:
         """Создание улучшенного контекста без системы намерений"""
-        base_context = f"Рабочая директория: '{self.config.filesystem_path}'"
+        base_context = f"DIR: {self.config.filesystem_path}"
 
         # Краткая сводка постоянных данных (если есть)
         pdata = self.context_manager.get_persistent_data_summary()
         context_info = []
         if pdata.get("stored_users"):
-            context_info.append(f"ИЗВЕСТНЫЕ ПОЛЬЗОВАТЕЛИ: {pdata['user_list']}")
+            context_info.append(f"USERS: {', '.join(pdata['user_list'][:5])}")
         last_chat = pdata.get("last_entities", {}).get("chat")
         if last_chat:
-            context_info.append(f"ПОСЛЕДНИЙ ЧАТ: {last_chat}")
+            context_info.append(f"CHAT: {last_chat}")
         if pdata.get("stored_files"):
-            context_info.append("ИЗВЕСТНЫЕ ФАЙЛЫ ДОСТУПНЫ (сокр. список)")
+            context_info.append(f"FILES: {pdata.get('stored_files', 0)}")
 
-        context_section = "\n".join(context_info) if context_info else ""
+        context_section = " | ".join(context_info) if context_info else ""
 
-        instruction = (
-            "ЗАДАЧА: Выполни запрос пользователя, самостоятельно выбирая подходящие инструменты."
-        )
+        parts = [base_context]
+        if context_section:
+            parts.append(context_section)
+        parts.append(user_input)
 
-        enhanced_context = f"""
-{base_context}
-
-{instruction}
-
-{context_section}
-
-ЗАПРОС ПОЛЬЗОВАТЕЛЯ: {user_input}
-"""
-
-        return enhanced_context.strip()
+        return " | ".join(parts)
 
 
 
@@ -527,3 +563,33 @@ class FileSystemAgent:
     def get_loop_continuation_status(self) -> bool:
         """Получить статус режима игнорирования зацикливания"""
         return self._allow_loop_continuation
+
+    async def cleanup(self):
+        """Корректное закрытие агента и всех ресурсов"""
+        logger.info("🧹 Начало cleanup агента...")
+        
+        try:
+            # Закрываем MCP клиент
+            if self.mcp_client:
+                try:
+                    # Проверяем есть ли метод close или aclose
+                    if hasattr(self.mcp_client, 'aclose'):
+                        await self.mcp_client.aclose()
+                    elif hasattr(self.mcp_client, 'close'):
+                        if asyncio.iscoroutinefunction(self.mcp_client.close):
+                            await self.mcp_client.close()
+                        else:
+                            self.mcp_client.close()
+                    logger.info("✅ MCP клиент закрыт")
+                except Exception as e:
+                    logger.warning(f"⚠️ Ошибка при закрытии MCP клиента: {e}")
+            
+            # Очищаем контекст
+            if self.context_manager:
+                self.context_manager.clear_context(keep_stats=True)
+                logger.info("✅ Контекст очищен")
+            
+            logger.info("✅ Cleanup завершен успешно")
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка при cleanup: {e}")

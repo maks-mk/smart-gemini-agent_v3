@@ -2,6 +2,7 @@
 Rich терминальный интерфейс для Smart Gemini Agent
 """
 
+import asyncio
 import time
 from datetime import datetime
 from typing import Dict, Any, Optional
@@ -444,126 +445,141 @@ class RichInteractiveChat:
         )
         self.display.print_rule()
 
-        while True:
-            user_input = self.get_user_input()
+        try:
+            while True:
+                user_input = self.get_user_input()
 
-            if user_input is None:
-                break
-
-            if not user_input:
-                continue
-
-            self.add_to_history(user_input, "user")
-
-            if user_input.startswith("/"):
-                if self.process_system_command(user_input):
-                    continue
-                else:
+                if user_input is None:
                     break
 
-            if self.agent:
-                try:
-                    start_time = time.time()
-                    final_response = None
-                    has_called_tool_in_this_turn = False
-                    had_error_in_this_turn = False
-                    # Кэш последнего листинга директорий (для замены масок в финальном ответе)
-                    last_dir_files = []
-                    last_dir_dirs = []
+                if not user_input:
+                    continue
 
-                    self.console.print()  # Пустая строка перед началом
-                    self.display.print_rule(
-                        title="[bold yellow]Agent Activity[/bold yellow]"
-                    )
+                self.add_to_history(user_input, "user")
 
-                    async for chunk in self.agent.process_message(
-                        user_input, self.current_thread
-                    ):
-                        # Обработка предупреждения о зацикливании
-                        if "loop_warning" in chunk:
-                            warning_info = chunk["loop_warning"]
-                            self.console.print()
-                            self.console.print("[bold red]⚠️ ПРЕДУПРЕЖДЕНИЕ О ЗАЦИКЛИВАНИИ[/bold red]")
-                            self.console.print()
-                            self.console.print(warning_info["message"])
-                            self.console.print()
-                            # Продолжаем ожидать следующий chunk (может быть error или продолжение)
-                            continue
+                if user_input.startswith("/"):
+                    if self.process_system_command(user_input):
+                        continue
+                    else:
+                        break
 
-                        if "error" in chunk:
-                            self.display.display_error(chunk["error"])
-                            had_error_in_this_turn = True
-                            final_response = None
-                            break
+                if self.agent:
+                    try:
+                        start_time = time.time()
+                        final_response = None
+                        has_called_tool_in_this_turn = False
+                        had_error_in_this_turn = False
+                        # Кэш последнего листинга директорий (для замены масок в финальном ответе)
+                        last_dir_files = []
+                        last_dir_dirs = []
 
-                        # Отслеживаем, был ли вызван инструмент в этом ходу
-                        if "tools" in chunk and chunk["tools"]:
-                            has_called_tool_in_this_turn = True
+                        self.console.print()  # Пустая строка перед началом
+                        self.display.print_rule(
+                            title="[bold yellow]Agent Activity[/bold yellow]"
+                        )
 
-                        response_part = self._display_step(chunk)
-                        if response_part:
-                            final_response = response_part
-
-                    self.display.print_rule()
-                    self.console.print()  # Пустая строка после
-
-                    if final_response:
-                        # Если модель вернула маски вместо имён, заменим на реальные из результатов инструмента
                         try:
-                            if ("Содержимое текущей рабочей директории" in final_response or "Вот список файлов" in final_response) and (last_dir_files or last_dir_dirs):
-                                lines = []
-                                wd = getattr(getattr(self.agent, "config", None), "filesystem_path", "").strip()
-                                header = (
-                                    f"Вот список файлов и директорий в текущей рабочей директории {wd}:"
-                                    if "Вот список файлов" in final_response
-                                    else "Содержимое текущей рабочей директории:"
-                                )
-                                lines.append(header)
-                                if last_dir_files:
-                                    lines.append("")
-                                    lines.append("  • Файлы:")
-                                    for n in last_dir_files:
-                                        lines.append(f"     • {n}")
-                                if last_dir_dirs:
-                                    lines.append("  • Директории:")
-                                    for n in last_dir_dirs:
-                                        lines.append(f"     • {n}")
-                                final_response = "\n".join(lines)
-                        except Exception:
-                            pass
+                            async for chunk in self.agent.process_message(
+                                user_input, self.current_thread
+                            ):
+                                # Обработка предупреждения о зацикливании
+                                if "loop_warning" in chunk:
+                                    warning_info = chunk["loop_warning"]
+                                    self.console.print()
+                                    self.console.print("[bold red]⚠️ ПРЕДУПРЕЖДЕНИЕ О ЗАЦИКЛИВАНИИ[/bold red]")
+                                    self.console.print()
+                                    self.console.print(warning_info["message"])
+                                    self.console.print()
+                                    # Продолжаем ожидать следующий chunk (может быть error или продолжение)
+                                    continue
 
-                        # Гарантированно улучшаем форматирование финального ответа
-                        if self.agent and hasattr(self.agent, "response_formatter"):
+                                if "error" in chunk:
+                                    self.display.display_error(chunk["error"])
+                                    had_error_in_this_turn = True
+                                    final_response = None
+                                    break
+
+                                # Отслеживаем, был ли вызван инструмент в этом ходу
+                                if "tools" in chunk and chunk["tools"]:
+                                    has_called_tool_in_this_turn = True
+
+                                response_part = self._display_step(chunk)
+                                if response_part:
+                                    final_response = response_part
+                        except KeyboardInterrupt:
+                            self.console.print("\n⚠️ [yellow]Операция прервана пользователем (Ctrl+C)[/yellow]")
+                            raise
+                        except asyncio.CancelledError:
+                            self.console.print("\n⚠️ [yellow]Операция отменена[/yellow]")
+                            raise
+
+                        self.display.print_rule()
+                        self.console.print()  # Пустая строка после
+
+                        if final_response:
+                            # Если модель вернула маски вместо имён, заменим на реальные из результатов инструмента
                             try:
-                                final_response = self.agent.response_formatter.improve_file_content_formatting(
-                                    final_response
-                                )
+                                if ("Содержимое текущей рабочей директории" in final_response or "Вот список файлов" in final_response) and (last_dir_files or last_dir_dirs):
+                                    lines = []
+                                    wd = getattr(getattr(self.agent, "config", None), "filesystem_path", "").strip()
+                                    header = (
+                                        f"Вот список файлов и директорий в текущей рабочей директории {wd}:"
+                                        if "Вот список файлов" in final_response
+                                        else "Содержимое текущей рабочей директории:"
+                                    )
+                                    lines.append(header)
+                                    if last_dir_files:
+                                        lines.append("")
+                                        lines.append("  • Файлы:")
+                                        for n in last_dir_files:
+                                            lines.append(f"     • {n}")
+                                    if last_dir_dirs:
+                                        lines.append("  • Директории:")
+                                        for n in last_dir_dirs:
+                                            lines.append(f"     • {n}")
+                                    final_response = "\n".join(lines)
                             except Exception:
                                 pass
-                        response_time = time.time() - start_time
-                        self.add_to_history(final_response, "agent")
-                        self.display.display_agent_response(
-                            final_response, response_time
-                        )
-                    elif has_called_tool_in_this_turn and not had_error_in_this_turn:
-                        final_response = "✅ Задача успешно выполнена."
-                        response_time = time.time() - start_time
-                        self.add_to_history(final_response, "agent")
-                        self.display.display_agent_response(
-                            final_response, response_time
-                        )
-                    elif not had_error_in_this_turn:
-                        self.console.print(
-                            "⚠️ [yellow]Agent finished without a final response.[/yellow]"
-                        )
 
-                except Exception as e:
-                    error_msg = f"Error processing message: {str(e)}"
-                    self.add_to_history(error_msg, "error")
-                    self.display.display_error(error_msg)
-            else:
-                self.display.display_error("Agent not initialized")
+                            # Гарантированно улучшаем форматирование финального ответа
+                            if self.agent and hasattr(self.agent, "response_formatter"):
+                                try:
+                                    final_response = self.agent.response_formatter.improve_file_content_formatting(
+                                        final_response
+                                    )
+                                except Exception:
+                                    pass
+                            response_time = time.time() - start_time
+                            self.add_to_history(final_response, "agent")
+                            self.display.display_agent_response(
+                                final_response, response_time
+                            )
+                        elif has_called_tool_in_this_turn and not had_error_in_this_turn:
+                            final_response = "✅ Задача успешно выполнена."
+                            response_time = time.time() - start_time
+                            self.add_to_history(final_response, "agent")
+                            self.display.display_agent_response(
+                                final_response, response_time
+                            )
+                        elif not had_error_in_this_turn:
+                            self.console.print(
+                                "⚠️ [yellow]Agent finished without a final response.[/yellow]"
+                            )
 
-            self.console.print()
+                    except Exception as e:
+                        error_msg = f"Error processing message: {str(e)}"
+                        self.add_to_history(error_msg, "error")
+                        self.display.display_error(error_msg)
+                else:
+                    self.display.display_error("Agent not initialized")
 
-        self.console.print("[dim]Goodbye! 👋[/dim]")
+                self.console.print()
+        
+        except KeyboardInterrupt:
+            self.console.print("\n⚠️ [yellow]Прервано пользователем (Ctrl+C)[/yellow]")
+        except Exception as e:
+            error_msg = f"Critical error in chat loop: {str(e)}"
+            self.add_to_history(error_msg, "error")
+            self.display.display_error(error_msg)
+        finally:
+            self.console.print("[dim]Goodbye! 👋[/dim]")

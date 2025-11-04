@@ -16,25 +16,15 @@
       "icacls"
     ],
     "blockedArguments": [
-      "--exec",
-      "-e",
-      "/c",
-      "-enc",
-      "-encodedcommand",
-      "-command",
-      "--interactive",
-      "-i",
-      "--login",
-      "--system"
     ],
     "allowedPaths": [
       "C:\\Users\\maks",
       "D:\\"
-    ],
+      ],
     "restrictWorkingDirectory": true,
     "logCommands": true,
     "maxHistorySize": 1000,
-    "commandTimeout": 30,
+    "commandTimeout": 300,
     "enableInjectionProtection": true
   },
   "shells": {
@@ -47,10 +37,6 @@
         "-Command"
       ],
       "blockedOperators": [
-        "&",
-        "|",
-        ";",
-        "`"
       ]
     },
     "cmd": {
@@ -60,10 +46,6 @@
         "/c"
       ],
       "blockedOperators": [
-        "&",
-        "|",
-        ";",
-        "`"
       ]
     },
     "gitbash": {
@@ -73,10 +55,6 @@
         "-c"
       ],
       "blockedOperators": [
-        "&",
-        "|",
-        ";",
-        "`"
       ]
     }
   },
