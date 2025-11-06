@@ -6,16 +6,17 @@
         "debug_intent_analysis": false
     },
     "agent": {
-        "model_name": "deepseek/deepseek-chat-v3.1:free",
-        "model_provider": "openrouter",
+        "model_name": "kimi-k2-0905-preview",
+        "model_provider": "openai",
         "temperature": 0.1,
         "use_memory": true,
-        "max_context_files": 20
+        "max_context_files": 20,
+        "request_timeout": 300,
+        "tool_timeout": 300
     },
     "files": {
         "prompt_file": "prompt_optimized.md",
-        "mcp_config_file": "mcp.json",
-        "intents_file": "intents.json"
+        "mcp_config_file": "mcp.json"
     },
     "interface": {
         "show_timestamps": true,

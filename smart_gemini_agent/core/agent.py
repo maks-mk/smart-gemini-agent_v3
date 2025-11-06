@@ -119,15 +119,17 @@ class FileSystemAgent:
                     temperature=self.config.temperature,
                 )
                 logger.info(f"Используется модель Gemini: {self.config.model_name}")
-            elif self.config.model_provider == "openrouter":
-                api_key = os.getenv("OPENROUTER_API_KEY")
+            elif self.config.model_provider in ["openai", "openrouter"]:
+                api_key = os.getenv("OPENAI_API_KEY")
                 model = ChatOpenAI(
                     model=self.config.model_name,
                     api_key=convert_to_secret_str(api_key) if api_key else None,
-                    base_url="https://openrouter.ai/api/v1",
+                    base_url=os.getenv("OPENAI_BASE_URL"),
                     temperature=self.config.temperature,
                 )
-                logger.info(f"Используется модель OpenRouter: {self.config.model_name}")
+                logger.info(
+                    f"Используется модель OpenAI-совместимая ({self.config.model_provider}): {self.config.model_name}"
+                )
             else:
                 raise ValueError(
                     f"Неподдерживаемый провайдер модели: {self.config.model_provider}"

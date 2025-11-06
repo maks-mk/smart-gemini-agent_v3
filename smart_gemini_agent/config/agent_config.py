@@ -87,12 +87,17 @@ class AgentConfig:
             raise ValueError(f"Путь не существует: {self.filesystem_path}")
 
         # Проверяем API ключ в зависимости от провайдера
-        if self.model_provider == "gemini" and not os.getenv("GOOGLE_API_KEY"):
-            raise ValueError("Отсутствует переменная окружения: GOOGLE_API_KEY")
-        elif self.model_provider == "openrouter" and not os.getenv(
-            "OPENROUTER_API_KEY"
-        ):
-            raise ValueError("Отсутствует переменная окружения: OPENROUTER_API_KEY")
+        if self.model_provider == "gemini":
+            if not os.getenv("GOOGLE_API_KEY"):
+                raise ValueError("Отсутствует переменная окружения: GOOGLE_API_KEY")
+        elif self.model_provider in ["openai", "openrouter"]:
+            # Поддерживаем OpenAI-совместимые API (OpenAI, OpenRouter, Moonshot AI, и др.)
+            if not os.getenv("OPENAI_API_KEY"):
+                raise ValueError("Отсутствует переменная окружения: OPENAI_API_KEY")
+            if not os.getenv("OPENAI_BASE_URL"):
+                logger.warning(
+                    "OPENAI_BASE_URL не установлен, будет использован базовый URL OpenAI"
+                )
 
     def get_mcp_config(self) -> Dict[str, Any]:
         """Загрузка конфигурации MCP серверов из файла"""

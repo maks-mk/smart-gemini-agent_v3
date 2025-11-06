@@ -94,7 +94,7 @@
 
 ## 🚀 Поддержка нескольких провайдеров ИИ
 
-Теперь агент поддерживает как Google Gemini, так и модели от OpenRouter:
+Агент поддерживает **Google Gemini** и **OpenAI-совместимые API** (OpenAI, OpenRouter, Moonshot AI, и другие):
 
 ### Google Gemini (по умолчанию)
 ```json
@@ -107,18 +107,26 @@
 }
 ```
 
-### OpenRouter модели
+### OpenAI-совместимые модели
 ```json
 {
   "agent": {
-    "model_name": "openai/gpt-4o-mini",
-    "model_provider": "openrouter",
+    "model_name": "kimi-k2-0905-preview",
+    "model_provider": "openai",
     "temperature": 0.1
   }
 }
 ```
 
-Смотрите пример конфигурации в `config-openrouter-example.json`.
+**Поддерживаемые провайдеры:**
+- ✅ **OpenAI** (официальный OpenAI API)
+- ✅ **OpenRouter** (агрегатор моделей)
+- ✅ **Moonshot AI** (модели kimi)
+- ✅ **Любой OpenAI-совместимый API** через `OPENAI_BASE_URL`
+
+**Примеры конфигураций:**
+- `config.json` - конфигурация по умолчанию (может быть настроена для любого провайдера)
+- `test-openrouter-config.json` - пример для OpenRouter/Moonshot AI
 
 ## 📁 Архитектура проекта
 
@@ -174,31 +182,35 @@ cp .env.example .env
 
 Затем отредактируйте файл `.env`, добавив ключи и опции:
 
+**Для Google Gemini:**
 ```
-# Провайдеры
 GOOGLE_API_KEY=your_gemini_api_key_here
-OPENROUTER_API_KEY=your_openrouter_api_key_here
-
-# Путь файловой системы (рабочая директория агента)
 FILESYSTEM_PATH=D:\\smart-gemini-agent_v3\\
+TEMPERATURE=0.1
+```
 
-# Переопределение модели (опционально)
-GEMINI_MODEL=gemini-2.5-flash
-OPENROUTER_MODEL=openai/gpt-4o-mini
+**Для OpenAI-совместимых API (OpenRouter, Moonshot AI, и др.):**
+```
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_BASE_URL=https://api.moonshot.ai/v1
+FILESYSTEM_PATH=D:\\smart-gemini-agent_v3\\
 TEMPERATURE=0.1
 ```
 
 Или установите переменные окружения в вашей системе:
 
 ```bash
-# Ключи
+# Google Gemini
 export GOOGLE_API_KEY="your_gemini_api_key"
-export OPENROUTER_API_KEY="your_openrouter_api_key"
 
-# Опции
+# OpenAI/OpenRouter/Moonshot AI
+export OPENAI_API_KEY="your_api_key"
+export OPENAI_BASE_URL="https://api.moonshot.ai/v1"  # Moonshot AI
+# или: https://openrouter.ai/api/v1  # OpenRouter
+# или: https://api.openai.com/v1      # OpenAI
+
+# Общие настройки
 export FILESYSTEM_PATH="D:/smart-gemini-agent_v3/"
-export GEMINI_MODEL="gemini-2.5-flash"
-export OPENROUTER_MODEL="openai/gpt-4o-mini"
 export TEMPERATURE=0.1
 ```
 
@@ -232,9 +244,9 @@ python main.py --config test-openrouter-config.json
 
 | Файл | Описание | Модуль |
 |------|----------|--------|
-| `config.json` | Основные настройки агента | `config/agent_config.py` |
-| `config-openrouter-example.json` | Пример конфигурации для OpenRouter | `config/agent_config.py` |
-| `.env` | Переменные окружения (API ключи) | Вся система |
+| `config.json` | Основные настройки агента (любой провайдер) | `config/agent_config.py` |
+| `test-openrouter-config.json` | Пример конфигурации для OpenRouter/Moonshot | `config/agent_config.py` |
+| `.env` | Переменные окружения (API ключи, OPENAI_BASE_URL) | Вся система |
 | `intents.json` | Конфигурация намерений и паттернов | `core/intent_analyzer.py` |
 | `prompt.md` | Системный промпт | `core/prompt_manager.py` |
 | `mcp.json` | Конфигурация MCP серверов | `config/agent_config.py` |
@@ -264,12 +276,12 @@ python main.py --config test-openrouter-config.json
 }
 ```
 
-### Пример config.json для OpenRouter
+### Пример config.json для OpenAI-совместимых API
 ```json
 {
   "agent": {
-    "model_name": "openai/gpt-4o-mini",
-    "model_provider": "openrouter",
+    "model_name": "kimi-k2-0905-preview",
+    "model_provider": "openai",
     "temperature": 0.1,
     "use_memory": true,
     "max_context_files": 20
@@ -288,6 +300,8 @@ python main.py --config test-openrouter-config.json
   }
 }
 ```
+
+**Примечание:** В `.env` должен быть установлен `OPENAI_BASE_URL` для соответствующего API провайдера.
 
 ### Поддерживаемые MCP-серверы и транспорты
 
@@ -743,6 +757,8 @@ MIT License - см. [LICENSE](LICENSE) файл для деталей.
 ## 🙏 Благодарности
 
 - **Google Gemini** за мощный AI движок
+- **OpenAI** за стандарт API для совместимых моделей
+- **OpenRouter** и **Moonshot AI** за доступ к современным моделям
 - **Model Context Protocol** за стандарт интеграции
 - **Rich** за красивый терминальный интерфейс
 - **LangChain** за инструменты работы с AI

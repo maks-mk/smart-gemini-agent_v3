@@ -72,19 +72,25 @@ def _apply_environment_overrides(config: AgentConfig) -> AgentConfig:
         config.filesystem_path = filesystem_path_env
         logging.info(f"Путь filesystem переопределен из ENV: {filesystem_path_env}")
 
-    # Переопределяем модель Gemini
+    # Переопределяем модель и провайдер из ENV (приоритет ENV > config)
     gemini_model_env = os.getenv("GEMINI_MODEL")
+    openrouter_model_env = os.getenv("OPENROUTER_MODEL")
+    openai_model_env = os.getenv("OPENAI_MODEL")
+    openai_base_url_env = os.getenv("OPENAI_BASE_URL")
+
     if gemini_model_env:
         config.model_name = gemini_model_env
         config.model_provider = "gemini"
         logging.info(f"Используется модель Gemini из ENV: {gemini_model_env}")
-
-    # Переопределяем модель OpenRouter
-    openrouter_model_env = os.getenv("OPENROUTER_MODEL")
-    if openrouter_model_env:
-        config.model_name = openrouter_model_env
-        config.model_provider = "openrouter"
-        logging.info(f"Используется модель OpenRouter из ENV: {openrouter_model_env}")
+    elif openrouter_model_env or openai_model_env:
+        # OpenRouter и OpenAI - это OpenAI-совместимые провайдеры
+        model_name = openrouter_model_env or openai_model_env
+        config.model_name = model_name
+        config.model_provider = "openai"
+        logging.info(f"Используется OpenAI-совместимая модель из ENV: {model_name}")
+        if openai_base_url_env:
+            os.environ["OPENAI_BASE_URL"] = openai_base_url_env
+            logging.info(f"Установлен OpenAI Base URL из ENV: {openai_base_url_env}")
 
     # Переопределяем температуру
     temperature_env = os.getenv("TEMPERATURE")
@@ -167,6 +173,8 @@ async def main(config_file: str = DEFAULT_CONFIG_FILE):
 
 
 if __name__ == "__main__":
+    # Инициализация события завершения
+    shutdown_event = asyncio.Event()
     # Настройка обработчиков сигналов
     if sys.platform != "win32":
         # Unix-подобные системы
@@ -190,7 +198,7 @@ if __name__ == "__main__":
   
 Переменные окружения:
   GOOGLE_API_KEY      - API ключ для Google Gemini
-  OPENROUTER_API_KEY  - API ключ для OpenRouter
+  OPENAI_API_KEY      - API ключ для OpenAI
   FILESYSTEM_PATH     - Путь к рабочей директории
   TEMPERATURE         - Температура модели (0.0-1.0)
         """
