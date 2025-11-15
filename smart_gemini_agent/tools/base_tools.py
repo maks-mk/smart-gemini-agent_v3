@@ -34,7 +34,10 @@ class SafeToolMixin(ABC):
             target_path = target_path.resolve()
 
             # Проверяем, что путь находится внутри рабочей директории
-            if not str(target_path).startswith(str(self.working_directory)):
+            # Используем Path.relative_to, чтобы избежать ошибок со строковыми префиксами
+            try:
+                target_path.relative_to(self.working_directory)
+            except ValueError:
                 return (
                     False,
                     f"Попытка доступа к файлу вне рабочей директории: {target_path}",

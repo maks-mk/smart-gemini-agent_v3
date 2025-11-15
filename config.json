@@ -11,11 +11,26 @@
         "use_memory": true,
         "max_context_files": 20,
         "request_timeout": 300,
-        "tool_timeout": 300
+        "tool_timeout": 300,
+        
+        "_comment": "=== Новые параметры v5.0 - Agent Ops & Production Features ===",
+        
+        "enable_observability": true,
+        "enable_evaluation": true,
+        "traces_dir": "./traces",
+        
+        "use_long_term_memory": true,
+        "memory_path": "./agent_memory",
+        "embedding_provider": "simple",
+        
+        "enable_planning": true,
+        
+        "enable_guardrails": true
     },
     "files": {
-        "prompt_file": "prompt_optimized.md",
-        "mcp_config_file": "mcp.json"
+        "prompt_file": "prompt_new.md",
+        "mcp_config_file": "mcp.json",
+        "security_policies_file": "security_policies.json"
     },
     "interface": {
         "show_timestamps": true,

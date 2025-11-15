@@ -1,12 +1,6 @@
 """
 Rich терминальный интерфейс для Smart Gemini Agent
 """
-from prompt_toolkit import Application
-from prompt_toolkit.shortcuts import PromptSession
-from prompt_toolkit.completion import WordCompleter
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.document import Document
-from prompt_toolkit.styles import Style
 
 import asyncio
 import time
@@ -61,74 +55,17 @@ class RichInteractiveChat:
         """Очистка экрана"""
         self.console.clear()
 
-    async def get_user_input(self) -> Optional[str]:
-        """Multiline input with Alt+Enter for newline, Enter to submit, and proper paste handling."""
-        style = Style.from_dict({"prompt": "ansiblue bold"})
-
-        # Простое автодополнение команд
-        commands = WordCompleter(
-            [
-                "/quit", "/exit",
-                "/help", "/clear", "/status",
-                "/history", "/tree",
-                "/tools", "/export", "/reload",
-                "/memory", "/memory_stats", "/memory_search", "/memory_clear",
-                "/insights", "/metrics", "/traces",
-                "/plan", "/security_stats", "/run_plan",
-                "/next", "/next_task",
-                "/export_context",
-                "/продолжить", "/continue",
-                "/остановить", "/stop_loop",
-                "/loop_status",
-            ],
-            ignore_case=True,
-            sentence=True,
-        )        
-        kb = KeyBindings()
-
-        # Enter -> отправка сообщения
-        @kb.add("enter")
-        def _(event):
-            event.current_buffer.validate_and_handle()
-
-        # Alt+Enter -> вставка перевода строки
-        @kb.add("escape", "enter")
-        def _(event):
-            event.current_buffer.insert_text("\n")
-
-        # Ctrl+C -> очистка текущего ввода, не выходим из программы
-        @kb.add("c-c")
-        def _(event):
-            event.current_buffer.reset()
-        
-        # Tab -> автодополнение
-        @kb.add("tab")
-        def _(event):
-            buff = event.current_buffer
-            if buff.complete_state:
-                buff.complete_next()
-            else:
-                buff.start_completion()
-
-        session = PromptSession(
-            message=[("class:prompt", "💬 You: ")],
-            multiline=True,
-            style=style,
-            key_bindings=kb,
-            completer=commands,
-        )
-
+    def get_user_input(self) -> Optional[str]:
+        """Получение ввода от пользователя"""
         try:
-            text = await session.prompt_async()
-            if text is None:
-                return None
-            return text.strip()
-        except KeyboardInterrupt:
-            # Ctrl+C очищает строку, не выходит из программы
-            return ""
-        except EOFError:
-            return None
+            user_input = Prompt.ask(
+                "[bold blue]💬 You[/bold blue]", console=self.console
+            ).strip()
 
+            return user_input if user_input else None
+
+        except (KeyboardInterrupt, EOFError):
+            return None
 
     def add_to_history(self, content: str, entry_type: str):
         """Добавление записи в историю"""
@@ -905,7 +842,7 @@ class RichInteractiveChat:
 
         try:
             while True:
-                user_input = await self.get_user_input()
+                user_input = self.get_user_input()
 
                 if user_input is None:
                     break

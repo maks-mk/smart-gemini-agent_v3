@@ -30,6 +30,17 @@ class AgentConfig:
     max_context_files: int = 20
     request_timeout: float = 300.0  # Таймаут запроса в секундах
     tool_timeout: float = 300.0  # Таймаут инструмента в секундах
+    
+    # Новые параметры для Agent Ops и улучшенной архитектуры
+    enable_observability: bool = True  # Метрики и трассировка
+    enable_evaluation: bool = True  # Оценка качества ответов
+    use_long_term_memory: bool = True  # Долговременная память
+    memory_path: str = "./agent_memory"  # Путь к векторному хранилищу
+    embedding_provider: str = "simple"  # simple или openai
+    enable_planning: bool = True  # Система планирования
+    enable_guardrails: bool = True  # Система безопасности
+    security_policies_file: str = "security_policies.json"  # Политики безопасности
+    traces_dir: str = "./traces"  # Директория трассировок
 
     @classmethod
     def from_file(cls, config_file: str = "config.json") -> "AgentConfig":
@@ -59,6 +70,16 @@ class AgentConfig:
                     mcp_config_file=files_config.get("mcp_config_file", "mcp.json"),
                     request_timeout=float(agent_config.get("request_timeout", 300.0)),
                     tool_timeout=float(agent_config.get("tool_timeout", 300.0)),
+                    # Новые параметры
+                    enable_observability=agent_config.get("enable_observability", True),
+                    enable_evaluation=agent_config.get("enable_evaluation", True),
+                    use_long_term_memory=agent_config.get("use_long_term_memory", True),
+                    memory_path=agent_config.get("memory_path", "./agent_memory"),
+                    embedding_provider=agent_config.get("embedding_provider", "simple"),
+                    enable_planning=agent_config.get("enable_planning", True),
+                    enable_guardrails=agent_config.get("enable_guardrails", True),
+                    security_policies_file=files_config.get("security_policies_file", "security_policies.json"),
+                    traces_dir=agent_config.get("traces_dir", "./traces"),
                 )
             else:
                 logger.info(

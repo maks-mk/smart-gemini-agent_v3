@@ -23,27 +23,56 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from ..config.agent_config import AgentConfig
 from ..tools.delete_tools import SafeDeleteFileTool, SafeDeleteDirectoryTool
+from ..tools.planning_tools import PlanCreateTool, PlanNextTool, PlanRunTool
 from ..tools.tool_analyzer import ToolAnalyzer
 from ..utils.decorators import retry_on_failure, retry_on_failure_async_gen
 from ..utils.timeout import async_gen_timeout_wrapper, get_watchdog
+from ..utils.constants import (
+    MAX_RETRY_ATTEMPTS,
+    DEFAULT_THREAD_ID,
+    MAX_RECOVERY_SUGGESTIONS,
+    RATE_LIMIT_HTTP_CODE,
+    MAX_TOOL_REPEATS,
+    DEFAULT_REQUEST_TIMEOUT,
+    DEFAULT_TOOL_TIMEOUT,
+    RETRY_DELAY_PATTERN,
+)
 from .prompt_manager import PromptManager
 from .response_formatter import ResponseFormatter
 from .context_manager import SmartContextManager, ContextType
 from .error_recovery import ErrorRecoverySystem
 
+# Инициализация logger перед импортом опциональных модулей
 logger = logging.getLogger(__name__)
 
-# Константы для производительности
-MAX_RETRY_ATTEMPTS = 2
-DEFAULT_THREAD_ID = "default"
-MAX_RECOVERY_SUGGESTIONS = 3
-RATE_LIMIT_HTTP_CODE = "429"
-MAX_TOOL_REPEATS = 5  # Максимальное количество повторов одного инструмента
-DEFAULT_REQUEST_TIMEOUT = 300.0  # Таймаут запроса по умолчанию (секунды)
-DEFAULT_TOOL_TIMEOUT = 300.0  # Таймаут инструмента по умолчанию (секунды)
+# Новые модули v5.0
+try:
+    from ..observability import AgentMetrics, AgentTracer, QualityEvaluator
+    OBSERVABILITY_AVAILABLE = True
+except ImportError:
+    OBSERVABILITY_AVAILABLE = False
+    logger.warning("⚠️  Модуль observability не доступен")
 
-# Предкомпилированные регулярные выражения
-_RETRY_DELAY_PATTERN = re.compile(r"retry_delay\s*{\s*seconds:\s*(\d+)")
+try:
+    from ..memory import LongTermMemory
+    MEMORY_AVAILABLE = True
+except ImportError:
+    MEMORY_AVAILABLE = False
+    logger.warning("⚠️  Модуль memory не доступен")
+
+try:
+    from ..planning import TaskPlanner
+    PLANNING_AVAILABLE = True
+except ImportError:
+    PLANNING_AVAILABLE = False
+    logger.warning("⚠️  Модуль planning не доступен")
+
+try:
+    from ..security import SecurityGuardrails
+    SECURITY_AVAILABLE = True
+except ImportError:
+    SECURITY_AVAILABLE = False
+    logger.warning("⚠️  Модуль security не доступен")
 
 
 class LoopDetectedException(Exception):
@@ -68,8 +97,10 @@ class FileSystemAgent:
         self.checkpointer = None
         self.mcp_client = None
         self.tools: List[BaseTool] = []
+        self.tools_map = {}
         self._initialized = False
         self._allow_loop_continuation = False  # Флаг для продолжения при зацикливании
+        self._reset_checkpoint_on_next_run = False
         
         # Таймауты
         self.request_timeout = getattr(config, 'request_timeout', DEFAULT_REQUEST_TIMEOUT)
@@ -89,6 +120,44 @@ class FileSystemAgent:
         self.response_formatter = ResponseFormatter(
             debug_mode=getattr(config, 'debug_mode', False)
         )
+        
+        # === НОВЫЕ МОДУЛИ V5.0 ===
+        
+        # Agent Ops: Observability
+        self.metrics = None
+        self.tracer = None
+        self.evaluator = None
+        
+        if getattr(config, 'enable_observability', True) and OBSERVABILITY_AVAILABLE:
+            self.metrics = AgentMetrics()
+            self.tracer = AgentTracer(traces_dir=getattr(config, 'traces_dir', './traces'))
+            
+            if getattr(config, 'enable_evaluation', True):
+                self.evaluator = QualityEvaluator()
+            
+            logger.info("✅ Agent Ops: Observability включена")
+        
+        # Долговременная память
+        self.long_term_memory = None
+        
+        if getattr(config, 'use_long_term_memory', True) and MEMORY_AVAILABLE:
+            self.long_term_memory = LongTermMemory(
+                persist_directory=getattr(config, 'memory_path', './agent_memory'),
+                embedding_provider=getattr(config, 'embedding_provider', 'simple')
+            )
+            logger.info("✅ Долговременная память включена")
+        
+        # Планирование (инициализируется позже после создания модели)
+        self.task_planner = None
+        self._enable_planning = getattr(config, 'enable_planning', True) and PLANNING_AVAILABLE
+        self.current_plan = None
+        
+        # Безопасность (Guardrails)
+        self.guardrails = None
+        
+        if getattr(config, 'enable_guardrails', True) and SECURITY_AVAILABLE:
+            self.guardrails = SecurityGuardrails()
+            logger.info("✅ Система безопасности (Guardrails) включена")
 
         logger.info(f"Создан умный агент с {config.model_provider}")
         logger.info(f"Рабочая директория: {config.filesystem_path}")
@@ -148,6 +217,11 @@ class FileSystemAgent:
                 checkpointer=self.checkpointer,
                 prompt=self.prompt_manager.get_system_prompt(),
             )
+            
+            # === ИНИЦИАЛИЗАЦИЯ ПЛАНИРОВЩИКА (после создания модели) ===
+            if self._enable_planning:
+                self.task_planner = TaskPlanner(llm=model)
+                logger.info("✅ Система планирования инициализирована")
 
             self._initialized = True
             logger.info("✅ Агент успешно инициализирован")
@@ -229,12 +303,26 @@ class FileSystemAgent:
             working_directory=cast(Path, self.config.filesystem_path)
         )
 
+        # Инструменты планирования плана задач
+        plan_create_tool = PlanCreateTool(agent=self)
+        plan_next_tool = PlanNextTool(agent=self)
+        plan_run_tool = PlanRunTool(agent=self)
+
         # Добавляем к списку инструментов
-        self.tools.extend([delete_file_tool, delete_dir_tool])
+        self.tools.extend([
+            delete_file_tool,
+            delete_dir_tool,
+            plan_create_tool,
+            plan_next_tool,
+            plan_run_tool,
+        ])
 
         logger.info("Добавлены локальные инструменты:")
         logger.info(f"  • {delete_file_tool.name}: {delete_file_tool.description}")
         logger.info(f"  • {delete_dir_tool.name}: {delete_dir_tool.description}")
+        logger.info(f"  • {plan_create_tool.name}: {plan_create_tool.description}")
+        logger.info(f"  • {plan_next_tool.name}: {plan_next_tool.description}")
+        logger.info(f"  • {plan_run_tool.name}: {plan_run_tool.description}")
 
     @retry_on_failure_async_gen()
     async def process_message(
@@ -251,6 +339,24 @@ class FileSystemAgent:
         tool_used = None
         success = True
         error_message = None
+        # v5.0: инструментирование
+        task_metrics = None
+        tools_used_set: set[str] = set()
+        active_tool_name: Optional[str] = None
+        active_tool_start: Optional[float] = None
+        final_response_text: Optional[str] = None
+        # Трассировка
+        if self.tracer:
+            try:
+                self.tracer.start_trace(task=user_input, metadata={"thread_id": thread_id})
+            except Exception:
+                pass
+        # Метрики
+        if self.metrics:
+            try:
+                task_metrics = self.metrics.start_task(task_id=f"task_{int(start_time)}")
+            except Exception:
+                task_metrics = None
         
         # Отслеживание повторяющихся вызовов инструментов
         tool_call_tracker: Dict[str, int] = {}
@@ -266,15 +372,19 @@ class FileSystemAgent:
                 }
                 return
 
+            effective_thread_id = thread_id
+            if self.checkpointer and self._reset_checkpoint_on_next_run:
+                effective_thread_id = f"{thread_id}-{int(time.time())}"
+                self._reset_checkpoint_on_next_run = False
+
             config: RunnableConfig = {
-                "configurable": {"thread_id": thread_id},
+                "configurable": {"thread_id": effective_thread_id},
                 "recursion_limit": 20  # Ограничиваем рекурсию для предотвращения зависания
             }
             message_input = {"messages": [HumanMessage(content=enhanced_input)]}
 
             # Используем таймаут обертку для предотвращения зависаний
             stream_gen = self.agent.astream(message_input, config)
-            last_activity = time.time()
             
             async for chunk in async_gen_timeout_wrapper(
                 stream_gen,
@@ -289,15 +399,30 @@ class FileSystemAgent:
                         for msg in agent_step["messages"]:
                             if msg.tool_calls:
                                 for tool_call in msg.tool_calls:
-                                    tool_used = tool_call["name"]
+                                    tool_name = tool_call["name"]
+                                    tool_used = tool_name
+                                    tools_used_set.add(str(tool_name))
                                     
                                     # Отслеживаем повторяющиеся вызовы
-                                    tool_call_tracker[tool_used] = tool_call_tracker.get(tool_used, 0) + 1
+                                    tool_call_tracker[tool_name] = tool_call_tracker.get(tool_name, 0) + 1
+                                    # Трассировка span для инструмента
+                                    if self.tracer and active_tool_name is None:
+                                        try:
+                                            self.tracer.start_span(
+                                                name=f"tool:{tool_name}",
+                                                attributes={"args": tool_call.get("args", {})}
+                                            )
+                                        except Exception:
+                                            pass
+                                    # Запомним старт времени для оценки длительности
+                                    if active_tool_name is None:
+                                        active_tool_name = tool_name
+                                        active_tool_start = time.time()
                                     
                                     # Обнаружено зацикливание
-                                    if tool_call_tracker[tool_used] > MAX_TOOL_REPEATS:
+                                    if tool_call_tracker[tool_name] > MAX_TOOL_REPEATS:
                                         logger.warning(
-                                            f"⚠️ Инструмент '{tool_used}' вызван {tool_call_tracker[tool_used]} раз. "
+                                            f"⚠️ Инструмент '{tool_name}' вызван {tool_call_tracker[tool_name]} раз. "
                                             f"Возможно зацикливание!"
                                         )
                                         
@@ -306,18 +431,59 @@ class FileSystemAgent:
                                             # Выдаем специальное событие с предупреждением
                                             yield {
                                                 "loop_warning": {
-                                                    "tool_name": tool_used,
-                                                    "call_count": tool_call_tracker[tool_used],
+                                                    "tool_name": tool_name,
+                                                    "call_count": tool_call_tracker[tool_name],
                                                     "message": (
-                                                        f"Loop: {tool_used} x{tool_call_tracker[tool_used]}\n"
+                                                        f"Loop: {tool_name} x{tool_call_tracker[tool_name]}\n"
                                                         f"Stop | /continue | disable in mcp.json"
                                                     )
                                                 }
                                             }
                                             # Останавливаем выполнение
-                                            raise LoopDetectedException(tool_used, tool_call_tracker[tool_used])
+                                            raise LoopDetectedException(tool_name, tool_call_tracker[tool_name])
+                            else:
+                                # Нет вызова инструмента: это может быть текстовая мысль или финальный ответ
+                                try:
+                                    content = getattr(msg, "content", None)
+                                    if content:
+                                        final_response_text = str(content)
+                                except Exception:
+                                    pass
 
-                last_activity = time.time()
+                # Фиксируем завершение вызова инструмента по приходу блока tools
+                if "tools" in chunk and active_tool_name:
+                    # Метрики по инструменту
+                    if self.metrics:
+                        try:
+                            duration = (time.time() - active_tool_start) if active_tool_start else 0.0
+                            self.metrics.record_tool_call(active_tool_name, duration=duration, success=True)
+                        except Exception:
+                            pass
+                    # Завершаем span
+                    if self.tracer:
+                        try:
+                            # end_span завершит текущий span
+                            if getattr(self.tracer, "current_span", None):
+                                self.tracer.end_span(self.tracer.current_span)
+                        except Exception:
+                            pass
+                    # Сбрасываем активный инструмент после фиксации метрик
+                    active_tool_name = None
+                    active_tool_start = None
+
+                # Сохраняем финальный ответ для памяти
+                if "__end__" in chunk:
+                    try:
+                        messages = chunk["__end__"].get("messages", [])
+                        if messages:
+                            last_message = messages[-1]
+                            if hasattr(last_message, "content") and last_message.content:
+                                if isinstance(last_message.content, list):
+                                    final_response_text = "\n".join(map(str, last_message.content))
+                                else:
+                                    final_response_text = str(last_message.content)
+                    except Exception:
+                        pass
                 yield chunk
 
         except TimeoutError as e:
@@ -338,7 +504,7 @@ class FileSystemAgent:
         except ResourceExhausted as e:
             error_text = str(e)
             retry_secs = None
-            m = _RETRY_DELAY_PATTERN.search(error_text)
+            m = RETRY_DELAY_PATTERN.search(error_text)
             if m:
                 retry_secs = int(m.group(1))
 
@@ -363,6 +529,7 @@ class FileSystemAgent:
             success = False
             error_message = str(e)
             logger.error(f"Loop stopped: {error_message}")
+            self._reset_checkpoint_on_next_run = True
             yield {
                 "error": (
                     f"Stopped: {error_message}\n"
@@ -407,6 +574,14 @@ class FileSystemAgent:
             import traceback
 
             logger.error(f"Трассировка: {traceback.format_exc()}")
+            try:
+                if (
+                    "tool_calls" in str(e)
+                    and ("toolmessage" in str(e).lower() or "validate_chat_history" in str(e).lower())
+                ):
+                    self._reset_checkpoint_on_next_run = True
+            except Exception:
+                pass
             yield {"error": final_error_msg}
 
         finally:
@@ -421,6 +596,56 @@ class FileSystemAgent:
                 tool_used=tool_used,
                 execution_time=execution_time,
             )
+            # Завершение метрик по задаче
+            if self.metrics and task_metrics:
+                try:
+                    quality_score = None
+                    eval_text = final_response_text
+                    if not eval_text and success:
+                        if tools_used_set:
+                            tool_list = ", ".join(sorted(tools_used_set))
+                            eval_text = (
+                                f"Задача выполнена успешно. Использованы инструменты: {tool_list}. "
+                                f"Время выполнения: {execution_time:.1f}с."
+                            )
+                        else:
+                            eval_text = "Задача выполнена успешно."
+                    if self.evaluator and eval_text:
+                        try:
+                            eval_result = await self.evaluator.evaluate_response(
+                                task=user_input,
+                                response=eval_text,
+                            )
+                            quality_score = getattr(eval_result, "overall_score", None)
+                        except Exception:
+                            quality_score = None
+                    self.metrics.complete_task(
+                        task_metrics,
+                        success=success,
+                        error_type=(error_message.split(':')[0] if error_message else None),
+                        quality_score=quality_score,
+                    )
+                except Exception:
+                    pass
+            # Завершение трассировки
+            if self.tracer:
+                try:
+                    self.tracer.end_trace()
+                except Exception:
+                    pass
+            # Сохранение в долговременную память
+            if self.long_term_memory and final_response_text:
+                try:
+                    await self.long_term_memory.remember(
+                        interaction_type="chat",
+                        user_input=user_input,
+                        agent_response=final_response_text,
+                        tools_used=list(tools_used_set),
+                        success=success,
+                        metadata={"thread_id": thread_id},
+                    )
+                except Exception:
+                    pass
 
     def _create_enhanced_context(self, user_input: str) -> str:
         """Создание улучшенного контекста без системы намерений"""
@@ -430,7 +655,9 @@ class FileSystemAgent:
         pdata = self.context_manager.get_persistent_data_summary()
         context_info = []
         if pdata.get("stored_users"):
-            context_info.append(f"USERS: {', '.join(pdata['user_list'][:5])}")
+            user_list = pdata.get("user_list", [])
+            if user_list:
+                context_info.append(f"USERS: {', '.join(user_list[:5])}")
         last_chat = pdata.get("last_entities", {}).get("chat")
         if last_chat:
             context_info.append(f"CHAT: {last_chat}")
@@ -477,6 +704,13 @@ class FileSystemAgent:
                 "Universal MCP Support",
             ],
             "error_recovery_stats": self.error_recovery.get_error_statistics(),
+            # v5.0 features
+            "v5_features": {
+                "observability_enabled": self.metrics is not None,
+                "long_term_memory_enabled": self.long_term_memory is not None,
+                "planning_enabled": self.task_planner is not None,
+                "guardrails_enabled": self.guardrails is not None,
+            },
         }
 
     def reload_prompt(self) -> str:
@@ -485,14 +719,13 @@ class FileSystemAgent:
 
     def switch_prompt(self, new_prompt_file: str) -> bool:
         """Переключение на новый файл промпта"""
-        if self.prompt_manager.update_prompt_file(new_prompt_file):
-            # Обновляем конфигурацию
-            from ..utils.config_updater import ConfigUpdater
+        # Обновляем конфигурацию
+        from ..utils.config_updater import ConfigUpdater
 
-            updater = ConfigUpdater()
-            updater.update_prompt_file(new_prompt_file)
-
+        updater = ConfigUpdater()
+        if updater.update_prompt_file(new_prompt_file):
             # Перезагружаем промпт
+            self.config.prompt_file = new_prompt_file
             self.reload_prompt()
             logger.info(f"Промпт переключен на: {new_prompt_file}")
             return True
@@ -528,6 +761,80 @@ class FileSystemAgent:
     def get_available_categories(self) -> List[str]:
         """Получение списка доступных категорий инструментов"""
         return [cat for cat, tools in self.tools_map.items() if tools]
+    
+    # === НОВЫЕ МЕТОДЫ V5.0 ===
+    
+    def get_metrics_summary(self) -> Optional[Dict[str, Any]]:
+        """Получение сводки метрик агента"""
+        if self.metrics:
+            return self.metrics.get_summary()
+        return None
+    
+    def print_metrics(self):
+        """Вывод метрик в консоль"""
+        if self.metrics:
+            self.metrics.print_summary()
+        else:
+            logger.warning("⚠️  Метрики не включены")
+    
+    def get_recent_traces(self, count: int = 5) -> List:
+        """Получение последних трассировок"""
+        if self.tracer:
+            return self.tracer.get_recent_traces(count)
+        return []
+    
+    def print_trace(self, trace_id: Optional[str] = None):
+        """Вывод трассировки в консоль"""
+        if self.tracer:
+            if trace_id:
+                self.tracer.print_trace(trace_id)
+            elif self.tracer.current_trace:
+                self.tracer.print_trace(self.tracer.current_trace.trace_id)
+        else:
+            logger.warning("⚠️  Трассировка не включена")
+    
+    def get_memory_statistics(self) -> Optional[Dict]:
+        """Получение статистики долговременной памяти"""
+        if self.long_term_memory:
+            return self.long_term_memory.get_statistics()
+        return None
+    
+    async def search_memory(self, query: str, k: int = 5) -> List:
+        """Поиск в долговременной памяти"""
+        if self.long_term_memory:
+            return await self.long_term_memory.recall_similar(query, k=k)
+        return []
+    
+    def clear_long_term_memory(self):
+        """Очистка долговременной памяти"""
+        if self.long_term_memory:
+            self.long_term_memory.clear()
+            logger.info("🗑️  Долговременная память очищена")
+        else:
+            logger.warning("⚠️  Долговременная память не включена")
+    
+    async def create_task_plan(self, task: str) -> Optional[Any]:
+        """Создание плана для сложной задачи"""
+        if self.task_planner:
+            plan = await self.task_planner.create_execution_plan(task)
+            self.current_plan = plan
+            return plan
+        else:
+            logger.warning("⚠️  Система планирования не включена")
+            return None
+    
+    def get_security_statistics(self) -> Optional[Dict]:
+        """Получение статистики системы безопасности"""
+        if self.guardrails:
+            return self.guardrails.get_statistics()
+        return None
+    
+    def update_security_policy(self, key: str, value: Any):
+        """Обновление политики безопасности"""
+        if self.guardrails:
+            self.guardrails.update_policy(key, value)
+        else:
+            logger.warning("⚠️  Система безопасности не включена")
 
     def _format_enhanced_error(
         self, error_message: str, error_type, recovery_actions: List
@@ -554,11 +861,13 @@ class FileSystemAgent:
         """Включить режим игнорирования зацикливания"""
         self._allow_loop_continuation = True
         logger.info("✅ Режим игнорирования зацикливания включен")
+        self._reset_checkpoint_on_next_run = True
         return "✅ Режим игнорирования зацикливания включен. Следующий запрос будет выполнен без остановки на повторяющихся вызовах инструментов."
 
     def disable_loop_continuation(self):
         """Выключить режим игнорирования зацикливания"""
         self._allow_loop_continuation = False
+        self._reset_checkpoint_on_next_run = False
         logger.info("❌ Режим игнорирования зацикливания выключен")
         return "❌ Режим игнорирования зацикливания выключен. Агент будет останавливаться при обнаружении зацикливания."
 
@@ -566,11 +875,133 @@ class FileSystemAgent:
         """Получить статус режима игнорирования зацикливания"""
         return self._allow_loop_continuation
 
+    def set_current_plan(self, plan: Any) -> None:
+        self.current_plan = plan
+
+    def get_current_plan(self) -> Optional[Any]:
+        return self.current_plan
+
+    async def execute_next_task(self) -> Dict[str, Any]:
+        if not self.task_planner or not self.current_plan:
+            return {"error": "Нет активного плана или планировщик отключен"}
+        try:
+            from ..planning.task_planner import TaskStatus as PlanTaskStatus
+        except Exception:
+            return {"error": "Планировщик недоступен"}
+        next_task = self.current_plan.get_next_task()
+        if not next_task:
+            return {"message": "Нет готовых к выполнению подзадач"}
+        next_task.status = PlanTaskStatus.IN_PROGRESS
+        exec_res = await self._execute_text_step(next_task.description)
+        if exec_res.get("success"):
+            next_task.status = PlanTaskStatus.COMPLETED
+            next_task.result = exec_res.get("final_response")
+            return {"completed": True, "task_id": next_task.id}
+        else:
+            next_task.status = PlanTaskStatus.FAILED
+            next_task.error = exec_res.get("error")
+            return {"completed": False, "task_id": next_task.id, "error": next_task.error}
+
+    async def run_plan(self) -> Dict[str, Any]:
+        if not self.task_planner or not self.current_plan:
+            return {"error": "Нет активного плана или планировщик отключен"}
+        completed = 0
+        failed = 0
+        failed_retry_attempts = 0
+        max_failed_retries = 1
+        while True:
+            res = await self.execute_next_task()
+            if "message" in res and res["message"]:
+                if self._allow_loop_continuation and failed_retry_attempts < max_failed_retries:
+                    try:
+                        from ..planning.task_planner import TaskStatus as PlanTaskStatus
+                        failed_task = next((t for t in self.current_plan.subtasks if t.status == PlanTaskStatus.FAILED), None)
+                    except Exception:
+                        failed_task = None
+                    if failed_task is not None:
+                        try:
+                            failed_task.status = PlanTaskStatus.PENDING
+                            failed_retry_attempts += 1
+                            continue
+                        except Exception:
+                            pass
+                break
+            if res.get("completed") is True:
+                completed += 1
+            elif res.get("completed") is False:
+                failed += 1
+            else:
+                break
+        prog = self.current_plan.get_progress() if hasattr(self.current_plan, "get_progress") else {}
+        return {"completed_count": completed, "failed_count": failed, "progress": prog}
+
+    async def _execute_text_step(self, text: str) -> Dict[str, Any]:
+        final_response = None
+        error_msg = None
+        try:
+            async for chunk in self.process_message(text, thread_id="plan"):
+                if "error" in chunk:
+                    error_msg = chunk["error"]
+                    break
+                if "agent" in chunk:
+                    agent_step = chunk["agent"]
+                    if isinstance(agent_step, dict) and agent_step.get("messages"):
+                        for msg in agent_step["messages"]:
+                            try:
+                                content = getattr(msg, "content", None)
+                                if content:
+                                    final_response = str(content)
+                            except Exception:
+                                pass
+                if "__end__" in chunk:
+                    try:
+                        messages = chunk["__end__"].get("messages", [])
+                        if messages:
+                            last_message = messages[-1]
+                            if hasattr(last_message, "content") and last_message.content:
+                                final_response = str(last_message.content)
+                    except Exception:
+                        pass
+        except Exception as e:
+            error_msg = str(e)
+        return {"success": error_msg is None, "final_response": final_response, "error": error_msg}
+
     async def cleanup(self):
         """Корректное закрытие агента и всех ресурсов"""
         logger.info("🧹 Начало cleanup агента...")
         
         try:
+            # === CLEANUP НОВЫХ МОДУЛЕЙ V5.0 ===
+            
+            # Экспорт метрик и трассировок перед завершением
+            if self.metrics:
+                try:
+                    self.metrics.print_summary()
+                    logger.info("✅ Метрики сохранены")
+                except Exception as e:
+                    logger.warning(f"⚠️ Ошибка сохранения метрик: {e}")
+            
+            if self.tracer and self.tracer.current_trace:
+                try:
+                    self.tracer.end_trace()
+                    logger.info("✅ Трассировка завершена")
+                except Exception as e:
+                    logger.warning(f"⚠️ Ошибка завершения трассировки: {e}")
+            
+            if self.guardrails:
+                try:
+                    stats = self.guardrails.get_statistics()
+                    if isinstance(stats, dict):
+                        total_validations = stats.get("total_validations")
+                        blocked_actions = stats.get("blocked_actions")
+                        logger.info(
+                            f"🛡️ Безопасность: проверено {total_validations}, заблокировано {blocked_actions}"
+                        )
+                    else:
+                        logger.info(f"🛡️ Безопасность: статистика безопасности: {stats}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Ошибка получения статистики безопасности: {e}")
+            
             # Закрываем MCP клиент
             if self.mcp_client:
                 try:
@@ -595,3 +1026,12 @@ class FileSystemAgent:
             
         except Exception as e:
             logger.error(f"❌ Ошибка при cleanup: {e}")
+        finally:
+            # Гарантированно переводим агент в неинициализированное состояние
+            self._initialized = False
+            self.agent = None
+            self.mcp_client = None
+            self.checkpointer = None
+            self.tools = []
+            self.tools_map = {}
+            self.current_plan = None

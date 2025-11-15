@@ -1,6 +1,6 @@
 # Core dependencies
 python-dotenv>=1.0.0
-
+prompt_toolkit
 # AI and LangChain
 langchain-google-genai>=1.0.0
 langchain-openai>=0.1.0
@@ -19,6 +19,19 @@ httpx>=0.24.0           # Modern HTTP client with HTTP/2 support
 aiohttp>=3.8.0          # Async HTTP client/server
 sse-starlette>=1.6.0    # Server-Sent Events support
 websockets>=11.0        # WebSocket support for potential future use
+
+# Agent Ops and Observability (новое в v5.0)
+prometheus-client>=0.19.0  # Метрики производительности
+
+# Долговременная память (опционально)
+# chromadb>=0.4.0           # Векторное хранилище (pip install chromadb)
+# sentence-transformers>=2.2.0  # Для эмбеддингов (pip install sentence-transformers)
+# langchain-community>=0.1.0     # Для интеграции с Chroma (pip install langchain-community)
+
+# OpenTelemetry для продвинутой трассировки (опционально)
+# opentelemetry-api>=1.20.0              # pip install opentelemetry-api
+# opentelemetry-sdk>=1.20.0              # pip install opentelemetry-sdk
+# opentelemetry-exporter-otlp>=1.20.0    # pip install opentelemetry-exporter-otlp
 
 # Optional MCP servers (install separately)
 # duckduckgo-mcp-server  # pip install duckduckgo-mcp-server

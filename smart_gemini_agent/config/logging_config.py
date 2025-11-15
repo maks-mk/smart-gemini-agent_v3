@@ -17,6 +17,21 @@ class IgnoreSchemaWarnings(logging.Filter):
         return not any(msg in record.getMessage() for msg in ignore_messages)
 
 
+class MaxLevelFilter(logging.Filter):
+    """Фильтр, который пропускает только сообщения не выше заданного уровня.
+
+    Используется, чтобы не выводить ERROR/CRITICAL в консоль, но продолжать
+    писать их в лог-файл.
+    """
+
+    def __init__(self, max_level: int) -> None:
+        super().__init__()
+        self.max_level = max_level
+
+    def filter(self, record) -> bool:  # type: ignore[override]
+        return record.levelno <= self.max_level
+
+
 def setup_logging(
     level: int = logging.INFO,
     log_file: Optional[str] = "ai_agent.log",
@@ -35,7 +50,8 @@ def setup_logging(
     """
 
     # Создаем обработчики
-    handlers: list[logging.Handler] = [logging.StreamHandler()]
+    stream_handler = logging.StreamHandler()
+    handlers: list[logging.Handler] = [stream_handler]
 
     if log_file:
         handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
@@ -47,6 +63,10 @@ def setup_logging(
     schema_filter = IgnoreSchemaWarnings()
     for handler in logging.root.handlers:
         handler.addFilter(schema_filter)
+
+    # Подавляем ERROR/CRITICAL в консоли, оставляя их в лог-файле
+    # (шумные стек-трейсы и сообщения об ошибках LLM будут только в файле).
+    stream_handler.addFilter(MaxLevelFilter(logging.WARNING))
 
     # Дополнительно подавить логгеры MCP и других шумных компонентов
     noisy_loggers = [

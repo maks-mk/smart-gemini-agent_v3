@@ -44,7 +44,7 @@
     "command": "npx",
     "args": ["@modelcontextprotocol/server-sequential-thinking"],
     "transport": "stdio",
-    "enabled": true
+    "enabled": false
   },
   "win-cli": {
     "command": "npx",

@@ -1,0 +1,42 @@
+{
+  "_comment": "Политики безопасности для Smart Gemini Agent v5.0",
+  
+  "max_file_size_mb": 100,
+  
+  "allowed_file_extensions": [
+    ".txt", ".md", ".json", ".yaml", ".yml",
+    ".py", ".js", ".ts", ".jsx", ".tsx",
+    ".html", ".css", ".scss", ".xml",
+    ".csv", ".log", ".ini", ".cfg"
+  ],
+  
+  "blocked_paths": [
+    "/etc",
+    "/sys",
+    "/proc",
+    "/dev",
+    "C:\\Windows\\System32",
+    "C:\\Windows\\SysWOW64"
+  ],
+  
+  "max_command_length": 500,
+  
+  "require_confirmation": {
+    "delete": true,
+    "purchase": true,
+    "send_email": true,
+    "execute_command": true
+  },
+  
+  "max_purchase_amount": 100.0,
+  
+  "_comment_dangerous_commands": "Команды, которые всегда блокируются",
+  "dangerous_commands": [
+    "rm -rf",
+    "del /f /s /q",
+    "format",
+    "mkfs",
+    "dd if=",
+    ":(){ :|:& };:"
+  ]
+}

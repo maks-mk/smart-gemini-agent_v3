@@ -7,6 +7,7 @@ import logging
 from typing import Optional
 from ..config.agent_config import AgentConfig
 from ..tools.tool_analyzer import ToolAnalyzer
+from ..utils.config_updater import ConfigUpdater
 
 logger = logging.getLogger(__name__)
 
@@ -119,8 +120,5 @@ class PromptManager:
 
     def get_available_prompts(self) -> list[str]:
         """Получение списка доступных файлов промптов"""
-        prompt_files = []
-        for file in os.listdir("."):
-            if file.startswith("prompt") and file.endswith(".md"):
-                prompt_files.append(file)
-        return sorted(prompt_files)
+        updater = ConfigUpdater()
+        return updater.get_available_prompts()

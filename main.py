@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Smart Gemini Agent v4.0 - Модульная версия с оптимизированной производительностью
-Точка входа для запуска агента с поддержкой HTTP/SSE транспортов MCP
+Smart Gemini Agent v5.0 - Production-ready с Agent Ops, памятью, планированием и безопасностью
+Точка входа для запуска агента с поддержкой всех возможностей v5.0
 """
 
 import asyncio
@@ -18,12 +18,19 @@ from rich.console import Console
 
 from smart_gemini_agent import AgentConfig, FileSystemAgent, RichInteractiveChat
 from smart_gemini_agent.config.logging_config import setup_logging
+from smart_gemini_agent.utils.constants import (
+    DEFAULT_CONFIG_FILE,
+    APP_VERSION,
+    APP_NAME,
+    DEFAULT_LOG_LEVEL as CFG_DEFAULT_LOG_LEVEL,
+    DEFAULT_LOG_FILE as CFG_DEFAULT_LOG_FILE,
+    DEFAULT_LOG_FORMAT as CFG_DEFAULT_LOG_FORMAT,
+)
 
-# Константы по умолчанию
-DEFAULT_LOG_LEVEL = logging.INFO
-DEFAULT_LOG_FILE = "ai_agent.log"
-DEFAULT_LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
-DEFAULT_CONFIG_FILE = "config.json"
+# Константы логирования
+DEFAULT_LOG_LEVEL = getattr(logging, str(CFG_DEFAULT_LOG_LEVEL).upper(), logging.INFO)
+DEFAULT_LOG_FILE = CFG_DEFAULT_LOG_FILE
+DEFAULT_LOG_FORMAT = CFG_DEFAULT_LOG_FORMAT
 
 # Глобальные переменные для graceful shutdown
 shutdown_event: asyncio.Event
@@ -134,7 +141,7 @@ async def main(config_file: str = DEFAULT_CONFIG_FILE):
         agent_instance = agent
 
         # Показываем прогресс инициализации
-        with console.status("[bold green]Initializing Smart Gemini Agent v4.0...", spinner="dots"):
+        with console.status(f"[bold green]Initializing {APP_NAME} v{APP_VERSION}...", spinner="dots"):
             if not await agent.initialize():
                 console.print(
                     "❌ [bold red]Не удалось инициализировать агента. Проверьте логи.[/bold red]"
@@ -142,7 +149,7 @@ async def main(config_file: str = DEFAULT_CONFIG_FILE):
                 return
 
         console.print(
-            "✅ [bold green]Smart Gemini Agent v4.0 successfully initialized![/bold green]"
+            f"✅ [bold green]{APP_NAME} v{APP_VERSION} successfully initialized![/bold green]"
         )
         console.print(
             f"[cyan]Модель:[/cyan] {config.model_name} ({config.model_provider})"
@@ -189,7 +196,7 @@ if __name__ == "__main__":
     
     # Parse command line arguments
     parser = argparse.ArgumentParser(
-        description="Smart Gemini Agent v4.0 - Интеллектуальный AI ассистент с поддержкой HTTP/SSE транспортов MCP",
+        description=f"{APP_NAME} v{APP_VERSION} - Production-ready AI агент с Agent Ops, памятью, планированием и безопасностью",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Примеры использования:
