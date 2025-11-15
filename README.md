@@ -196,7 +196,6 @@ python main.py --config test-openrouter-config.json
 | `config.json` | Основные настройки агента (любой провайдер) | `config/agent_config.py` |
 | `test-openrouter-config.json` | Пример конфигурации для OpenRouter/Moonshot | `config/agent_config.py` |
 | `.env` | Переменные окружения (API ключи, OPENAI_BASE_URL) | Вся система |
-| `intents.json` | Конфигурация намерений и паттернов (если используется IntentAnalyzer) | `core/intent_analyzer.py` |
 | `prompt_new.md` | Текущий системный промпт (files.prompt_file в `config.json`) | `core/prompt_manager.py` |
 | `mcp.json` | Конфигурация MCP серверов | `config/agent_config.py` |
 
